@@ -246,4 +246,22 @@ class ELNZeissTXRM(BaseNXtomoMeasurement, EntryData):
 
         super().normalize(archive, logger)
 
+class RawFileRecipeData(EntryData):
+    """Placeholder for the raw RCP file to point to the generated ELN."""
+    m_def = Section(label='Raw NXtomo Recipe File')
+    measurement = Quantity(
+        type=ELNZeissRecipe,
+        a_eln=dict(component=ELNComponentEnum.ReferenceEditQuantity),
+        description='The editable ELN archive generated from this raw recipe.',
+    )
+
+class RawFileTXRMData(EntryData):
+    """Placeholder for the raw TXRM file to point to the generated ELN."""
+    m_def = Section(label='Raw NXtomo TXRM File')
+    measurement = Quantity(
+        type=ELNZeissTXRM,
+        a_eln=dict(component=ELNComponentEnum.ReferenceEditQuantity),
+        description='The editable ELN archive generated from this raw experimental record.',
+    )
+
 m_package.__init_metainfo__()
