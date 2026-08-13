@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING
-import numpy as np
 
+import numpy as np
 from nomad.datamodel.data import JSON, ArchiveSection, EntryData
 from nomad.datamodel.metainfo.annotations import ELNComponentEnum
 from nomad.datamodel.metainfo.basesections import Measurement, MeasurementResult
@@ -21,6 +21,7 @@ m_package = SchemaPackage()
 # ==========================================
 class NXtomoInstrumentSetup(ArchiveSection):
     """Details about the X-ray microscope hardware."""
+
     source_voltage = Quantity(
         type=np.float64, unit='kV', description='X-ray source voltage.'
     )
@@ -28,25 +29,33 @@ class NXtomoInstrumentSetup(ArchiveSection):
         type=np.float64, description='Microscope objective magnification.'
     )
 
+
 class NXtomoAcquisitionSetup(ArchiveSection):
     """Parameters governing the tomographic scan execution."""
+
     exposure_time = Quantity(
         type=np.float64, unit='s', description='Exposure time per projection.'
     )
     total_images = Quantity(
         type=np.int32, description='Total number of radiographic projections.'
     )
-    acquisition_mode = Quantity(
-        type=str, description='Acquisition mode or scan type.'
-    )
+    acquisition_mode = Quantity(type=str, description='Acquisition mode or scan type.')
+
 
 class NXtomoRecipePoint(ArchiveSection):
     """A sub-section to store individual scan/warmup steps from a Recipe."""
-    point_name = Quantity(type=str, description='Name of the recipe point (e.g., WarmupA, Scan1).')
+
+    point_name = Quantity(
+        type=str, description='Name of the recipe point (e.g., WarmupA, Scan1).'
+    )
     instrument_setup = SubSection(section_def=NXtomoInstrumentSetup)
     acquisition_setup = SubSection(section_def=NXtomoAcquisitionSetup)
-    raw_acquisition_settings = Quantity(type=JSON, description='Raw acquisition metadata stream.')
-    raw_recon_settings = Quantity(type=JSON, description='Raw reconstruction metadata stream.')
+    raw_acquisition_settings = Quantity(
+        type=JSON, description='Raw acquisition metadata stream.'
+    )
+    raw_recon_settings = Quantity(
+        type=JSON, description='Raw reconstruction metadata stream.'
+    )
 
 
 # ==========================================
@@ -54,11 +63,14 @@ class NXtomoRecipePoint(ArchiveSection):
 # ==========================================
 class NXtomoResult(MeasurementResult):
     """Holds analytical data or lazy catalogs of the projections."""
+
     total_projections = Quantity(
-        type=np.int32, description='Actual total number of projections found in the file.'
+        type=np.int32,
+        description='Actual total number of projections found in the file.',
     )
     image_data_catalog = Quantity(
-        type=JSON, description='A summary of the projection image directories and their counts.'
+        type=JSON,
+        description='A summary of the projection image directories and their counts.',
     )
     temperature_info = Quantity(
         type=JSON, description='Temperature sensor records during acquisition.'
@@ -73,6 +85,7 @@ class NXtomoResult(MeasurementResult):
 # ==========================================
 class BaseNXtomoMeasurement(Measurement):
     """Base class containing shared attributes for NXtomo entries."""
+
     data_file = Quantity(
         type=str,
         a_eln=dict(component=ELNComponentEnum.FileEditQuantity),
@@ -107,7 +120,9 @@ class ELNZeissRecipe(BaseNXtomoMeasurement, EntryData):
     )
 
     recipe_name = Quantity(type=str, description='Name of the tomographic recipe.')
-    number_of_datasets = Quantity(type=np.int32, description='Expected number of data sets in this sequence.')
+    number_of_datasets = Quantity(
+        type=np.int32, description='Expected number of data sets in this sequence.'
+    )
 
     recipe_points = SubSection(section_def=NXtomoRecipePoint, repeats=True)
 
@@ -117,11 +132,15 @@ class ELNZeissRecipe(BaseNXtomoMeasurement, EntryData):
             return
 
         try:
-            file_path = archive.m_context.upload_files.raw_file_object(self.data_file).os_path
+            file_path = archive.m_context.upload_files.raw_file_object(
+                self.data_file
+            ).os_path
             rcp_data = read_rcp(file_path)
 
             if 'extraction_error' in rcp_data.metadata:
-                logger.warning(f"RCP Reader Warning: {rcp_data.metadata['extraction_error']}")
+                logger.warning(
+                    f'RCP Reader Warning: {rcp_data.metadata["extraction_error"]}'
+                )
 
             # Top-level Metadata
             self.raw_metadata = rcp_data.metadata
@@ -168,7 +187,7 @@ class ELNZeissRecipe(BaseNXtomoMeasurement, EntryData):
 
         except Exception as e:
             if logger:
-                logger.error(f"Error parsing ZEISS RCP file: {e}")
+                logger.error(f'Error parsing ZEISS RCP file: {e}')
             raise e
 
         super().normalize(archive, logger)
@@ -202,11 +221,15 @@ class ELNZeissTXRM(BaseNXtomoMeasurement, EntryData):
             return
 
         try:
-            file_path = archive.m_context.upload_files.raw_file_object(self.data_file).os_path
+            file_path = archive.m_context.upload_files.raw_file_object(
+                self.data_file
+            ).os_path
             txrm_data = read_txrm(file_path)
 
             if 'extraction_error' in txrm_data.metadata:
-                logger.warning(f"TXRM Reader Warning: {txrm_data.metadata['extraction_error']}")
+                logger.warning(
+                    f'TXRM Reader Warning: {txrm_data.metadata["extraction_error"]}'
+                )
 
             self._init_subsections()
 
@@ -241,13 +264,15 @@ class ELNZeissTXRM(BaseNXtomoMeasurement, EntryData):
 
         except Exception as e:
             if logger:
-                logger.error(f"Error parsing ZEISS TXRM file: {e}")
+                logger.error(f'Error parsing ZEISS TXRM file: {e}')
             raise e
 
         super().normalize(archive, logger)
 
+
 class RawFileRecipeData(EntryData):
     """Placeholder for the raw RCP file to point to the generated ELN."""
+
     m_def = Section(label='Raw NXtomo Recipe File')
     measurement = Quantity(
         type=ELNZeissRecipe,
@@ -255,13 +280,16 @@ class RawFileRecipeData(EntryData):
         description='The editable ELN archive generated from this raw recipe.',
     )
 
+
 class RawFileTXRMData(EntryData):
     """Placeholder for the raw TXRM file to point to the generated ELN."""
+
     m_def = Section(label='Raw NXtomo TXRM File')
     measurement = Quantity(
         type=ELNZeissTXRM,
         a_eln=dict(component=ELNComponentEnum.ReferenceEditQuantity),
         description='The editable ELN archive generated from this raw experimental record.',
     )
+
 
 m_package.__init_metainfo__()

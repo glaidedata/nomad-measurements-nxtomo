@@ -8,8 +8,9 @@ from nomad_measurements_nxtomo.schema_packages.schema_package import (
     ELNZeissRecipe,
     ELNZeissTXRM,
     RawFileRecipeData,
-    RawFileTXRMData
+    RawFileTXRMData,
 )
+
 
 class NXtomoParser(MatchingParser):
     def is_mainfile(
