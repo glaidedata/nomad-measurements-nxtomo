@@ -7,7 +7,7 @@ from nomad.datamodel.metainfo.basesections import Measurement, MeasurementResult
 from nomad.metainfo import Quantity, SchemaPackage, Section, SubSection
 
 # Import the readers from your extended readers package
-from readers_ientrance import read_rcp, read_txrm
+from readers_ientrance import read_rcp, read_txm, read_txrm
 
 if TYPE_CHECKING:
     from nomad.datamodel.datamodel import EntryArchive
@@ -67,6 +67,10 @@ class NXtomoResult(MeasurementResult):
     total_projections = Quantity(
         type=np.int32,
         description='Actual total number of projections found in the file.',
+    )
+    total_slices = Quantity(
+        type=np.int32,
+        description='Total number of 3D volume slices or blocks found in the TXM file.',
     )
     image_data_catalog = Quantity(
         type=JSON,
@@ -270,6 +274,79 @@ class ELNZeissTXRM(BaseNXtomoMeasurement, EntryData):
         super().normalize(archive, logger)
 
 
+# ==========================================
+# 6. ELN ENTRY: ZEISS 3D VOLUME (.txm)
+# ==========================================
+class ELNZeissTXM(BaseNXtomoMeasurement, EntryData):
+    m_def = Section(
+        label='ZEISS NXtomo 3D Reconstructed Volume',
+        a_eln=dict(lane_width='600px'),
+        a_template=dict(measurement_identifiers=dict()),
+    )
+
+    instrument_setup = SubSection(section_def=NXtomoInstrumentSetup)
+    raw_recon_settings = Quantity(
+        type=JSON, description='Complete dictionary of 3D reconstruction parameters.'
+    )
+    results = SubSection(section_def=NXtomoResult, repeats=True)
+
+    def _init_subsections(self):
+        if not self.instrument_setup:
+            self.instrument_setup = NXtomoInstrumentSetup()
+        if not self.results:
+            self.results = [NXtomoResult()]
+
+    def normalize(self, archive: 'EntryArchive', logger: 'BoundLogger'):
+        if not self.data_file:
+            super().normalize(archive, logger)
+            return
+
+        try:
+            file_path = archive.m_context.upload_files.raw_file_object(
+                self.data_file
+            ).os_path
+            txm_data = read_txm(file_path)
+
+            if 'extraction_error' in txm_data.metadata:
+                logger.warning(
+                    f'TXM Reader Warning: {txm_data.metadata["extraction_error"]}'
+                )
+
+            self._init_subsections()
+
+            self.raw_metadata = txm_data.metadata
+            self.software_version = str(txm_data.metadata.get('Version', 'Unknown'))
+            self.raw_recon_settings = txm_data.recon_settings
+
+            # Map core numeric setups (if available in the reconstructed file)
+            acq_settings = txm_data.acquisition_settings
+
+            src_voltage = acq_settings.get('SrcVoltage', {})
+            if isinstance(src_voltage, dict) and 'float32' in src_voltage:
+                self.instrument_setup.source_voltage = src_voltage['float32']
+
+            obj_mag = acq_settings.get('ObjectiveMag', {})
+            if isinstance(obj_mag, dict) and 'float32' in obj_mag:
+                self.instrument_setup.objective_magnification = obj_mag['float32']
+
+            # Map specific TXM records to results
+            res = self.results[0]
+            res.total_slices = txm_data.metadata.get('Total_3D_Slices_or_Blocks', 0)
+            res.image_data_catalog = txm_data.image_data_summary
+
+        except Exception as e:
+            if logger:
+                logger.error(f'Error parsing ZEISS TXM file: {e}')
+            raise e
+
+        super().normalize(archive, logger)
+
+
+# ==========================================
+# 7. RAW FILE PLACEHOLDERS
+# ==========================================
+
+
 class RawFileRecipeData(EntryData):
     """Placeholder for the raw RCP file to point to the generated ELN."""
 
@@ -289,6 +366,17 @@ class RawFileTXRMData(EntryData):
         type=ELNZeissTXRM,
         a_eln=dict(component=ELNComponentEnum.ReferenceEditQuantity),
         description='The editable ELN archive generated from this raw experimental record.',
+    )
+
+
+class RawFileTXMData(EntryData):
+    """Placeholder for the raw TXM file to point to the generated ELN."""
+
+    m_def = Section(label='Raw NXtomo TXM File')
+    measurement = Quantity(
+        type=ELNZeissTXM,
+        a_eln=dict(component=ELNComponentEnum.ReferenceEditQuantity),
+        description='The editable ELN archive generated from this raw 3D volume.',
     )
 
 

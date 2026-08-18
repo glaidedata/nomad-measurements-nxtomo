@@ -10,6 +10,6 @@ class NXtomoParserEntryPoint(ParserEntryPoint):
 
 parser_entry_point = NXtomoParserEntryPoint(
     name='NXtomo Parser',
-    description='Parser for ZEISS Xradia NXtomo files (.rcp and .txrm).',
-    mainfile_name_re=r'^.*\.(rcp|txrm|RCP|TXRM)$',
+    description='Parser for ZEISS Xradia NXtomo files (.rcp, .txrm, and .txm).',
+    mainfile_name_re=r'^.*\.(rcp|txrm|txm|RCP|TXRM|TXM)$',
 )

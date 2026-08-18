@@ -6,8 +6,10 @@ from nomad_measurements.utils import create_archive
 # Import NXtomo schema and placeholders
 from nomad_measurements_nxtomo.schema_packages.schema_package import (
     ELNZeissRecipe,
+    ELNZeissTXM,
     ELNZeissTXRM,
     RawFileRecipeData,
+    RawFileTXMData,
     RawFileTXRMData,
 )
 
@@ -26,7 +28,7 @@ class NXtomoParser(MatchingParser):
         filename_lower = filename.lower()
 
         # Check for both ZEISS formats
-        if filename_lower.endswith('.rcp') or filename_lower.endswith('.txrm'):
+        if filename_lower.endswith(('.rcp', '.txrm', '.txm')):
             # These files are binary OLE2 containers, so we ensure the buffer isn't empty.
             if buffer:
                 return True
@@ -56,6 +58,9 @@ class NXtomoParser(MatchingParser):
         elif filename_lower.endswith('.txrm'):
             entry = ELNZeissTXRM()
             raw_placeholder_class = RawFileTXRMData
+        elif filename_lower.endswith('.txm'):
+            entry = ELNZeissTXM()
+            raw_placeholder_class = RawFileTXMData
         else:
             logger.error(f'Unsupported NXtomo file format: {data_file}')
             return
