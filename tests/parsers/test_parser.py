@@ -27,7 +27,18 @@ def test_nxtomo_parser_is_mainfile():
         is True
     )
 
-    # 3. Should reject empty files
+    # 3. Should accept .txm files with binary content
+    assert (
+        parser.is_mainfile(
+            filename='LFP3_5c_4x_3.3um_recon.txm',
+            mime='application/octet-stream',
+            buffer=b'\xd0\xcf\x11\xe0',
+            decoded_buffer='',
+        )
+        is True
+    )
+
+    # 4. Should reject empty files
     assert (
         parser.is_mainfile(
             filename='empty.txrm',
@@ -38,7 +49,7 @@ def test_nxtomo_parser_is_mainfile():
         is False
     )
 
-    # 4. Should reject unsupported extensions
+    # 5. Should reject unsupported extensions
     assert (
         parser.is_mainfile(
             filename='image.wdf',

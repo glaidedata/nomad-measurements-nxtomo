@@ -4,10 +4,12 @@ import pytest
 from nomad.datamodel import EntryArchive
 from nomad.datamodel.datamodel import EntryMetadata
 from readers_ientrance.rcp_reader import RcpData, RecipePoint
+from readers_ientrance.txm_reader import TxmData
 from readers_ientrance.txrm_reader import TxrmData
 
 from nomad_measurements_nxtomo.schema_packages.schema_package import (
     ELNZeissRecipe,
+    ELNZeissTXM,
     ELNZeissTXRM,
 )
 
@@ -118,4 +120,50 @@ def test_eln_zeiss_txrm_normalization(mock_read_txrm, mock_archive):
     assert len(entry.results) == expected_results_count
     result = entry.results[0]
     assert result.total_projections == expected_projections
+    assert result.image_data_catalog['ImageData1'] == expected_image_data
+
+
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_txm')
+def test_eln_zeiss_txm_normalization(mock_read_txm, mock_archive):
+    """Test the metadata mapping logic for the TXM schema."""
+    # Define constants to avoid PLR2004 magic value linting errors
+    expected_mag = 40.0
+    expected_voltage = 80.0
+    expected_results_count = 1
+    expected_slices = 1000
+    expected_image_data = 250
+
+    # 1. Prepare Mock Data returned by the reader
+    mock_data = TxmData()
+    mock_data.metadata = {
+        'Version': '16.2.1',
+        'Total_3D_Slices_or_Blocks': expected_slices,
+    }
+    mock_data.acquisition_settings = {
+        'ObjectiveMag': {'int32': 1100924689, 'float32': expected_mag},
+        'SrcVoltage': {'int32': 1116471296, 'float32': expected_voltage},
+    }
+    mock_data.recon_settings = {'VoxelSize': {'float32': 2.5}}
+    mock_data.image_data_summary = {
+        'ImageData1': expected_image_data,
+    }
+
+    mock_read_txm.return_value = mock_data
+
+    # 2. Initialize the ELN Entry
+    entry = ELNZeissTXM()
+    entry.data_file = 'test.txm'
+
+    # 3. Run Normalization
+    entry.normalize(mock_archive, logger=None)
+
+    # 4. Assert Data Mapping
+    assert entry.software_version == '16.2.1'
+    assert entry.instrument_setup.objective_magnification == expected_mag
+    assert entry.instrument_setup.source_voltage.magnitude == expected_voltage
+    assert 'VoxelSize' in entry.raw_recon_settings
+
+    assert len(entry.results) == expected_results_count
+    result = entry.results[0]
+    assert result.total_slices == expected_slices
     assert result.image_data_catalog['ImageData1'] == expected_image_data
