@@ -347,14 +347,14 @@ class ELNZeissTXM(BaseNXtomoMeasurement, EntryData):
             self.software_version = str(txm_data.metadata.get('Version', 'Unknown'))
             self.raw_recon_settings = txm_data.recon_settings
 
-            # Map core numeric setups (if available in the reconstructed file)
-            acq_settings = txm_data.acquisition_settings
+            # Map core numeric setups (TXM stores these in ReconSettings, not AcquisitionSettings)
+            recon_settings = txm_data.recon_settings
 
-            src_voltage = acq_settings.get('SrcVoltage', {})
+            src_voltage = recon_settings.get('SourceVoltage', {})
             if isinstance(src_voltage, dict) and 'float32' in src_voltage:
                 self.instrument_setup.source_voltage = src_voltage['float32']
 
-            obj_mag = acq_settings.get('ObjectiveMag', {})
+            obj_mag = recon_settings.get('LensMagnification', {})
             if isinstance(obj_mag, dict) and 'float32' in obj_mag:
                 self.instrument_setup.objective_magnification = obj_mag['float32']
 
