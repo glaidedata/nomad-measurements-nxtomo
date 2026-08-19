@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 from nomad.datamodel import EntryArchive
 from nomad.datamodel.datamodel import EntryMetadata
@@ -80,8 +81,16 @@ def test_eln_zeiss_recipe_normalization(mock_read_rcp, mock_archive):
     assert mapped_point.acquisition_setup.total_images == expected_total_images
 
 
+# Bypass HDF5 physical file writing during the unit test (Removed 'self' from lambda)
+@patch(
+    'nomad.datamodel.hdf5.HDF5Dataset._normalize_impl',
+    side_effect=lambda value, **kwargs: value,
+)
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.extract_preview_image')
 @patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_txrm')
-def test_eln_zeiss_txrm_normalization(mock_read_txrm, mock_archive):
+def test_eln_zeiss_txrm_normalization(
+    mock_read_txrm, mock_extract_image, mock_hdf5_norm, mock_archive
+):
     """Test the metadata mapping logic for the TXRM schema."""
     # Define constants to avoid PLR2004 magic value linting errors
     expected_mag = 20.0
@@ -105,6 +114,9 @@ def test_eln_zeiss_txrm_normalization(mock_read_txrm, mock_archive):
 
     mock_read_txrm.return_value = mock_data
 
+    # Mock the numpy array returned by the image extractor
+    mock_extract_image.return_value = np.zeros((1010, 1010), dtype=np.uint16)
+
     # 2. Initialize the ELN Entry
     entry = ELNZeissTXRM()
     entry.data_file = 'test.txrm'
@@ -122,9 +134,21 @@ def test_eln_zeiss_txrm_normalization(mock_read_txrm, mock_archive):
     assert result.total_projections == expected_projections
     assert result.image_data_catalog['ImageData1'] == expected_image_data
 
+    # Assert preview image mapping
+    assert result.preview_image is not None
+    assert result.preview_image.shape == (1010, 1010)
 
+
+# Bypass HDF5 physical file writing during the unit test (Removed 'self' from lambda)
+@patch(
+    'nomad.datamodel.hdf5.HDF5Dataset._normalize_impl',
+    side_effect=lambda value, **kwargs: value,
+)
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.extract_preview_image')
 @patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_txm')
-def test_eln_zeiss_txm_normalization(mock_read_txm, mock_archive):
+def test_eln_zeiss_txm_normalization(
+    mock_read_txm, mock_extract_image, mock_hdf5_norm, mock_archive
+):
     """Test the metadata mapping logic for the TXM schema."""
     # Define constants to avoid PLR2004 magic value linting errors
     expected_mag = 40.0
@@ -139,16 +163,20 @@ def test_eln_zeiss_txm_normalization(mock_read_txm, mock_archive):
         'Version': '16.2.1',
         'Total_3D_Slices_or_Blocks': expected_slices,
     }
-    mock_data.acquisition_settings = {
-        'ObjectiveMag': {'int32': 1100924689, 'float32': expected_mag},
-        'SrcVoltage': {'int32': 1116471296, 'float32': expected_voltage},
+    # Moved hardware setups to recon_settings for TXM
+    mock_data.recon_settings = {
+        'LensMagnification': {'int32': 1100924689, 'float32': expected_mag},
+        'SourceVoltage': {'int32': 1116471296, 'float32': expected_voltage},
+        'VoxelSize': {'float32': 2.5},
     }
-    mock_data.recon_settings = {'VoxelSize': {'float32': 2.5}}
     mock_data.image_data_summary = {
         'ImageData1': expected_image_data,
     }
 
     mock_read_txm.return_value = mock_data
+
+    # Mock the numpy array returned by the image extractor
+    mock_extract_image.return_value = np.zeros((989, 1010), dtype=np.uint16)
 
     # 2. Initialize the ELN Entry
     entry = ELNZeissTXM()
@@ -167,3 +195,7 @@ def test_eln_zeiss_txm_normalization(mock_read_txm, mock_archive):
     result = entry.results[0]
     assert result.total_slices == expected_slices
     assert result.image_data_catalog['ImageData1'] == expected_image_data
+
+    # Assert preview image mapping
+    assert result.preview_image is not None
+    assert result.preview_image.shape == (989, 1010)
