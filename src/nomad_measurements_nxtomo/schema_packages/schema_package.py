@@ -2,12 +2,14 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from nomad.datamodel.data import JSON, ArchiveSection, EntryData
-from nomad.datamodel.metainfo.annotations import ELNComponentEnum
+from nomad.datamodel.hdf5 import HDF5Dataset
+from nomad.datamodel.metainfo.annotations import ELNComponentEnum, H5WebAnnotation
 from nomad.datamodel.metainfo.basesections import Measurement, MeasurementResult
 from nomad.metainfo import Quantity, SchemaPackage, Section, SubSection
 
 # Import the readers from your extended readers package
 from readers_ientrance import read_rcp, read_txm, read_txrm
+from readers_ientrance.txrm_reader import extract_preview_image
 
 if TYPE_CHECKING:
     from nomad.datamodel.datamodel import EntryArchive
@@ -64,6 +66,13 @@ class NXtomoRecipePoint(ArchiveSection):
 class NXtomoResult(MeasurementResult):
     """Holds analytical data or lazy catalogs of the projections."""
 
+    m_def = Section(a_h5web=H5WebAnnotation(signal='preview_image'))
+
+    preview_image = Quantity(
+        type=HDF5Dataset,
+        description='A 2D projection extracted from the file for preview purposes.',
+        a_eln=dict(overview=True),
+    )
     total_projections = Quantity(
         type=np.int32,
         description='Actual total number of projections found in the file.',
@@ -205,6 +214,7 @@ class ELNZeissTXRM(BaseNXtomoMeasurement, EntryData):
         label='ZEISS NXtomo Experimental Record',
         a_eln=dict(lane_width='600px'),
         a_template=dict(measurement_identifiers=dict()),
+        a_h5web=H5WebAnnotation(paths=['results/0']),
     )
 
     instrument_setup = SubSection(section_def=NXtomoInstrumentSetup)
@@ -266,6 +276,24 @@ class ELNZeissTXRM(BaseNXtomoMeasurement, EntryData):
             res.temperature_info = txrm_data.temperature_info
             res.hardware_stability = txrm_data.hw_stability
 
+            # Extract preview image and save as HDF5Dataset
+            img_width = 1010
+            width_data = txrm_data.image_info.get('ImageWidth', {})
+            if isinstance(width_data, dict) and 'int32' in width_data:
+                img_width = width_data['int32']
+
+            img_height = 1010
+            height_data = txrm_data.image_info.get('ImageHeight', {})
+            if isinstance(height_data, dict) and 'int32' in height_data:
+                img_height = height_data['int32']
+
+            preview_array = extract_preview_image(
+                file_path=file_path, width=img_width, height=img_height
+            )
+
+            if preview_array is not None:
+                res.preview_image = preview_array
+
         except Exception as e:
             if logger:
                 logger.error(f'Error parsing ZEISS TXRM file: {e}')
@@ -282,6 +310,7 @@ class ELNZeissTXM(BaseNXtomoMeasurement, EntryData):
         label='ZEISS NXtomo 3D Reconstructed Volume',
         a_eln=dict(lane_width='600px'),
         a_template=dict(measurement_identifiers=dict()),
+        a_h5web=H5WebAnnotation(paths=['results/0']),
     )
 
     instrument_setup = SubSection(section_def=NXtomoInstrumentSetup)
@@ -333,6 +362,24 @@ class ELNZeissTXM(BaseNXtomoMeasurement, EntryData):
             res = self.results[0]
             res.total_slices = txm_data.metadata.get('Total_3D_Slices_or_Blocks', 0)
             res.image_data_catalog = txm_data.image_data_summary
+
+            # --- EXTRACT PREVIEW IMAGE FOR TXM ---
+            img_width = 1010
+            width_data = txm_data.image_info.get('ImageWidth', {})
+            if isinstance(width_data, dict) and 'int32' in width_data:
+                img_width = width_data['int32']
+
+            img_height = 1010
+            height_data = txm_data.image_info.get('ImageHeight', {})
+            if isinstance(height_data, dict) and 'int32' in height_data:
+                img_height = height_data['int32']
+
+            preview_array = extract_preview_image(
+                file_path=file_path, width=img_width, height=img_height
+            )
+
+            if preview_array is not None:
+                res.preview_image = preview_array
 
         except Exception as e:
             if logger:
