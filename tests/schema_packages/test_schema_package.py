@@ -176,7 +176,10 @@ def test_eln_zeiss_txm_normalization(
     mock_read_txm.return_value = mock_data
 
     # Mock the numpy array returned by the image extractor
-    mock_extract_image.return_value = np.zeros((989, 1010), dtype=np.uint16)
+    # We add a non-zero value so it passes the empty-slice (min != max) safety check
+    dummy_image = np.zeros((989, 1010), dtype=np.uint16)
+    dummy_image[0, 0] = 65535  # Add a single bright pixel
+    mock_extract_image.return_value = dummy_image
 
     # 2. Initialize the ELN Entry
     entry = ELNZeissTXM()

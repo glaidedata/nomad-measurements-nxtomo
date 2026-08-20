@@ -374,12 +374,29 @@ class ELNZeissTXM(BaseNXtomoMeasurement, EntryData):
             if isinstance(height_data, dict) and 'int32' in height_data:
                 img_height = height_data['int32']
 
+            # Calculate the middle slice to avoid capturing empty air at the edge of the volume
+            middle_slice = max(1, res.total_slices // 2)
+
+            # ZEISS groups exactly 100 images per folder (e.g., Image500 is in ImageData5)
+            folder_idx = ((middle_slice - 1) // 100) + 1
+            target_stream = f'ImageData{folder_idx}/Image{middle_slice}'
+
             preview_array = extract_preview_image(
-                file_path=file_path, width=img_width, height=img_height
+                file_path=file_path,
+                target_stream=target_stream,
+                width=img_width,
+                height=img_height,
             )
 
             if preview_array is not None:
-                res.preview_image = preview_array
+                # If the slice happens to be completely uniform (e.g. all zeros), H5Web might fail to render it.
+                # A quick safety check: if the array isn't uniform, assign it.
+                if preview_array.min() != preview_array.max():
+                    res.preview_image = preview_array
+                elif logger:
+                    logger.warning(
+                        f'Extracted slice {target_stream} is completely blank.'
+                    )
 
         except Exception as e:
             if logger:
