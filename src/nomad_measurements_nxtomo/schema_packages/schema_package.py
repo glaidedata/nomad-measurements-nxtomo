@@ -365,12 +365,12 @@ class ELNZeissTXM(BaseNXtomoMeasurement, EntryData):
 
             # --- EXTRACT PREVIEW IMAGE FOR TXM ---
             img_width = 1010
-            width_data = txm_data.recon_input_tomo_params.get('CroppedWidth', {})
+            width_data = txm_data.image_info.get('ImageWidth', {})
             if isinstance(width_data, dict) and 'int32' in width_data:
                 img_width = width_data['int32']
 
             img_height = 1010
-            height_data = txm_data.recon_input_tomo_params.get('CroppedHeight', {})
+            height_data = txm_data.image_info.get('ImageHeight', {})
             if isinstance(height_data, dict) and 'int32' in height_data:
                 img_height = height_data['int32']
 
