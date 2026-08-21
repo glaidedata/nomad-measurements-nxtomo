@@ -27,7 +27,7 @@ license = { file = "LICENSE" }
 dependencies = [
     "nomad-lab>=1.4.3",
     "nomad-measurements",
-    "readers-ientrance @ git+https://github.com/glaidedata/readers-ientrance.git@feature/nxtomo-zeiss-reader"
+    "readers-ientrance @ git+https://github.com/glaidedata/readers-ientrance.git@v0.8.0"
 ]
 
 [project.urls]
