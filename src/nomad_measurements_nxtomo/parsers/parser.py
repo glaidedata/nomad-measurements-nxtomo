@@ -2,6 +2,7 @@ from nomad.datamodel.context import ServerContext
 from nomad.datamodel.datamodel import EntryArchive
 from nomad.parsing.parser import MatchingParser
 from nomad_measurements.utils import create_archive
+from olefile import MAGIC as OLE2_SIGNATURE
 
 # Import NXtomo schema and placeholders
 from nomad_measurements_nxtomo.schema_packages.schema_package import (
@@ -25,15 +26,9 @@ class NXtomoParser(MatchingParser):
     ) -> bool:
         """Gatekeeper for NXtomo OLE2 binary files."""
 
-        filename_lower = filename.lower()
-
-        # Check for both ZEISS formats
-        if filename_lower.endswith(('.rcp', '.txrm', '.txm')):
-            # These files are binary OLE2 containers, so we ensure the buffer isn't empty.
-            if buffer:
-                return True
-
-        return False
+        return filename.lower().endswith(
+            ('.rcp', '.txrm', '.txm')
+        ) and buffer.startswith(OLE2_SIGNATURE)
 
     def parse(
         self,
@@ -68,8 +63,8 @@ class NXtomoParser(MatchingParser):
         # Assign the file name to the entry
         entry.data_file = data_file
 
-        # Create the separate editable .archive.json file to preserve ELN edits
-        archive_name = f'{"".join(data_file.split(".")[:-1])}.archive.json'
+        # Keep the complete raw path in the generated archive identity.
+        archive_name = f'{data_file}.archive.json'
         eln_ref = create_archive(entry, archive, archive_name)
 
         # Link the raw binary file to the generated ELN

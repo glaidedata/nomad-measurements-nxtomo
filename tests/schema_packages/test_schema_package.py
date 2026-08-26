@@ -202,3 +202,115 @@ def test_eln_zeiss_txm_normalization(
     # Assert preview image mapping
     assert result.preview_image is not None
     assert result.preview_image.shape == (989, 1010)
+
+
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_rcp')
+def test_recipe_normalization_fails_on_reader_extraction_error(
+    mock_read_rcp, mock_archive
+):
+    """Reader failures stop RCP mapping and surface as normalization errors."""
+    mock_read_rcp.return_value = RcpData(
+        metadata={
+            'extraction_error': 'invalid recipe container',
+            'RecipeName': 'must not be mapped',
+            'NoOfTomoDataSets': {'int32': 2},
+        }
+    )
+    entry = ELNZeissRecipe(data_file='invalid.rcp')
+
+    with pytest.raises(
+        ValueError,
+        match='RCP reader extraction failed: invalid recipe container',
+    ):
+        entry.normalize(mock_archive, logger=None)
+
+    assert entry.raw_metadata is None
+    assert entry.recipe_name is None
+    assert entry.number_of_datasets is None
+    assert not entry.recipe_points
+
+
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.extract_preview_image')
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_txrm')
+def test_txrm_normalization_fails_on_reader_extraction_error(
+    mock_read_txrm, mock_extract_image, mock_archive
+):
+    """Reader failures stop TXRM mapping before setup and result creation."""
+    mock_read_txrm.return_value = TxrmData(
+        metadata={
+            'extraction_error': 'invalid acquisition container',
+            'Version': 'must not be mapped',
+            'Total_Projections': 2401,
+        },
+        acquisition_settings={'ObjectiveMag': {'float32': 20.0}},
+    )
+    entry = ELNZeissTXRM(data_file='invalid.txrm')
+
+    with pytest.raises(
+        ValueError,
+        match='TXRM reader extraction failed: invalid acquisition container',
+    ):
+        entry.normalize(mock_archive, logger=None)
+
+    assert entry.raw_metadata is None
+    assert entry.software_version is None
+    assert entry.instrument_setup is None
+    assert entry.acquisition_setup is None
+    assert not entry.results
+    mock_extract_image.assert_not_called()
+
+
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.extract_preview_image')
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_txm')
+def test_txm_normalization_fails_on_reader_extraction_error(
+    mock_read_txm, mock_extract_image, mock_archive
+):
+    """Reader failures stop TXM mapping before setup and result creation."""
+    mock_read_txm.return_value = TxmData(
+        metadata={
+            'extraction_error': 'invalid reconstruction container',
+            'Version': 'must not be mapped',
+            'Total_3D_Slices_or_Blocks': 1000,
+        },
+        recon_settings={'LensMagnification': {'float32': 40.0}},
+    )
+    entry = ELNZeissTXM(data_file='invalid.txm')
+
+    with pytest.raises(
+        ValueError,
+        match='TXM reader extraction failed: invalid reconstruction container',
+    ):
+        entry.normalize(mock_archive, logger=None)
+
+    assert entry.raw_metadata is None
+    assert entry.software_version is None
+    assert entry.raw_recon_settings is None
+    assert entry.instrument_setup is None
+    assert not entry.results
+    mock_extract_image.assert_not_called()
+
+
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.extract_preview_image')
+def test_txrm_normalization_fails_for_actual_invalid_file(
+    mock_extract_image, mock_archive, tmp_path
+):
+    """Structural reader validation rejects an actual non-OLE file on disk."""
+    invalid_file = tmp_path / 'invalid.txrm'
+    invalid_file.write_bytes(b'not an OLE2 container')
+    mock_archive.m_context.upload_files.raw_file_object.return_value.os_path = str(
+        invalid_file
+    )
+    entry = ELNZeissTXRM(data_file='invalid.txrm')
+
+    with pytest.raises(
+        ValueError,
+        match='TXRM reader extraction failed: Not a valid OLE2 file:',
+    ):
+        entry.normalize(mock_archive, logger=None)
+
+    assert entry.raw_metadata is None
+    assert entry.software_version is None
+    assert entry.instrument_setup is None
+    assert entry.acquisition_setup is None
+    assert not entry.results
+    mock_extract_image.assert_not_called()

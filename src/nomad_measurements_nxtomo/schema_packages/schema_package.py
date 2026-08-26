@@ -151,8 +151,9 @@ class ELNZeissRecipe(BaseNXtomoMeasurement, EntryData):
             rcp_data = read_rcp(file_path)
 
             if 'extraction_error' in rcp_data.metadata:
-                logger.warning(
-                    f'RCP Reader Warning: {rcp_data.metadata["extraction_error"]}'
+                raise ValueError(
+                    'RCP reader extraction failed: '
+                    f'{rcp_data.metadata["extraction_error"]}'
                 )
 
             # Top-level Metadata
@@ -241,8 +242,9 @@ class ELNZeissTXRM(BaseNXtomoMeasurement, EntryData):
             txrm_data = read_txrm(file_path)
 
             if 'extraction_error' in txrm_data.metadata:
-                logger.warning(
-                    f'TXRM Reader Warning: {txrm_data.metadata["extraction_error"]}'
+                raise ValueError(
+                    'TXRM reader extraction failed: '
+                    f'{txrm_data.metadata["extraction_error"]}'
                 )
 
             self._init_subsections()
@@ -337,8 +339,9 @@ class ELNZeissTXM(BaseNXtomoMeasurement, EntryData):
             txm_data = read_txm(file_path)
 
             if 'extraction_error' in txm_data.metadata:
-                logger.warning(
-                    f'TXM Reader Warning: {txm_data.metadata["extraction_error"]}'
+                raise ValueError(
+                    'TXM reader extraction failed: '
+                    f'{txm_data.metadata["extraction_error"]}'
                 )
 
             self._init_subsections()
