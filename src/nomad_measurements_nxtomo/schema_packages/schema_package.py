@@ -330,8 +330,7 @@ class ELNZeissTXM(BaseNXtomoMeasurement, EntryData):
 
         try:
             with archive.m_context.raw_file(self.data_file) as file:
-                file_path = file.name
-                txm_data = read_txm(file_path)
+                txm_data = read_txm(file.name, include_preview=True)
 
             if 'extraction_error' in txm_data.metadata:
                 raise ValueError(
@@ -360,41 +359,10 @@ class ELNZeissTXM(BaseNXtomoMeasurement, EntryData):
             res = self.results[0]
             res.total_slices = txm_data.metadata.get('Total_3D_Slices_or_Blocks', 0)
             res.image_data_catalog = txm_data.image_data_summary
-
-            # --- EXTRACT PREVIEW IMAGE FOR TXM ---
-            img_width = 1010
-            width_data = txm_data.image_info.get('ImageWidth', {})
-            if isinstance(width_data, dict) and 'int32' in width_data:
-                img_width = width_data['int32']
-
-            img_height = 1010
-            height_data = txm_data.image_info.get('ImageHeight', {})
-            if isinstance(height_data, dict) and 'int32' in height_data:
-                img_height = height_data['int32']
-
-            # Calculate the middle slice to avoid capturing empty air at the edge of the volume
-            middle_slice = max(1, res.total_slices // 2)
-
-            # ZEISS groups exactly 100 images per folder (e.g., Image500 is in ImageData5)
-            folder_idx = ((middle_slice - 1) // 100) + 1
-            target_stream = f'ImageData{folder_idx}/Image{middle_slice}'
-
-            preview_array = extract_preview_image(
-                file_path=file_path,
-                target_stream=target_stream,
-                width=img_width,
-                height=img_height,
-            )
-
-            if preview_array is not None:
-                # If the slice happens to be completely uniform (e.g. all zeros), H5Web might fail to render it.
-                # A quick safety check: if the array isn't uniform, assign it.
-                if preview_array.min() != preview_array.max():
-                    res.preview_image = preview_array
-                elif logger:
-                    logger.warning(
-                        f'Extracted slice {target_stream} is completely blank.'
-                    )
+            if txm_data.preview_image is not None:
+                res.preview_image = txm_data.preview_image
+            elif txm_data.preview_error and logger:
+                logger.warning(f'TXM preview unavailable: {txm_data.preview_error}')
 
         except Exception as e:
             if logger:

@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
@@ -174,7 +175,6 @@ def test_eln_zeiss_txrm_normalization(
     assert client_archive.m_context.opened_files[0].closed
 
 
-# Bypass HDF5 physical file writing during the unit test (Removed 'self' from lambda)
 @patch(
     'nomad.datamodel.hdf5.HDF5Dataset._normalize_impl',
     side_effect=lambda value, **kwargs: value,
@@ -193,28 +193,24 @@ def test_eln_zeiss_txm_normalization(
     expected_image_data = 250
 
     # 1. Prepare Mock Data returned by the reader
-    mock_data = TxmData()
-    mock_data.metadata = {
-        'Version': '16.2.1',
-        'Total_3D_Slices_or_Blocks': expected_slices,
-    }
-    # Moved hardware setups to recon_settings for TXM
-    mock_data.recon_settings = {
-        'LensMagnification': {'int32': 1100924689, 'float32': expected_mag},
-        'SourceVoltage': {'int32': 1116471296, 'float32': expected_voltage},
-        'VoxelSize': {'float32': 2.5},
-    }
-    mock_data.image_data_summary = {
-        'ImageData1': expected_image_data,
-    }
+    preview_image = np.zeros((989, 1010), dtype=np.uint16)
+    preview_image[0, 0] = 65535
+    mock_data = SimpleNamespace(
+        metadata={
+            'Version': '16.2.1',
+            'Total_3D_Slices_or_Blocks': expected_slices,
+        },
+        recon_settings={
+            'LensMagnification': {'int32': 1100924689, 'float32': expected_mag},
+            'SourceVoltage': {'int32': 1116471296, 'float32': expected_voltage},
+            'VoxelSize': {'float32': 2.5},
+        },
+        image_data_summary={'ImageData1': expected_image_data},
+        preview_image=preview_image,
+        preview_error=None,
+    )
 
     mock_read_txm.return_value = mock_data
-
-    # Mock the numpy array returned by the image extractor
-    # We add a non-zero value so it passes the empty-slice (min != max) safety check
-    dummy_image = np.zeros((989, 1010), dtype=np.uint16)
-    dummy_image[0, 0] = 65535  # Add a single bright pixel
-    mock_extract_image.return_value = dummy_image
 
     # 2. Initialize the ELN Entry
     entry = ELNZeissTXM()
@@ -234,10 +230,12 @@ def test_eln_zeiss_txm_normalization(
     assert result.total_slices == expected_slices
     assert result.image_data_catalog['ImageData1'] == expected_image_data
 
-    # Assert preview image mapping
     assert result.preview_image is not None
     assert result.preview_image.shape == (989, 1010)
-    mock_read_txm.assert_called_once_with(str(tmp_path / 'test.txm'))
+    mock_read_txm.assert_called_once_with(
+        str(tmp_path / 'test.txm'), include_preview=True
+    )
+    mock_extract_image.assert_not_called()
     assert client_archive.m_context.opened_files[0].closed
 
 
