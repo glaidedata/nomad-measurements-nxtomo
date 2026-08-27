@@ -1,8 +1,9 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 from nomad.datamodel import EntryArchive
+from nomad.datamodel.context import ClientContext
 from nomad.datamodel.datamodel import EntryMetadata
 from readers_ientrance.rcp_reader import RcpData, RecipePoint
 from readers_ientrance.txm_reader import TxmData
@@ -15,23 +16,40 @@ from nomad_measurements_nxtomo.schema_packages.schema_package import (
 )
 
 
-@pytest.fixture
-def mock_archive():
-    """Creates a mock NOMAD EntryArchive with a simulated file context and metadata."""
-    archive = EntryArchive()
-    archive.m_context = MagicMock()
-    # Simulate NOMAD finding the raw uploaded file path
-    archive.m_context.upload_files.raw_file_object.return_value.os_path = (
-        'mocked_path.file'
-    )
+class TrackingClientContext(ClientContext):
+    """Client context that records context-managed raw files for assertions."""
 
-    # Use real EntryMetadata to satisfy NOMAD and prevent SyntaxWarnings
+    def __init__(self, local_dir):
+        super().__init__(local_dir=local_dir)
+        self.opened_files = []
+
+    def raw_file(self, *args, **kwargs):
+        raw_file = super().raw_file(*args, **kwargs)
+        self.opened_files.append(raw_file)
+        return raw_file
+
+
+@pytest.fixture
+def client_archive(tmp_path):
+    """Creates an archive backed by a local portable NOMAD client context."""
+    for filename in (
+        'test.rcp',
+        'test.txrm',
+        'test.txm',
+        'invalid.rcp',
+        'invalid.txrm',
+        'invalid.txm',
+    ):
+        (tmp_path / filename).write_bytes(b'placeholder')
+
+    archive = EntryArchive()
+    archive.m_context = TrackingClientContext(local_dir=str(tmp_path))
     archive.metadata = EntryMetadata(entry_name='test_entry.archive.json')
     return archive
 
 
 @patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_rcp')
-def test_eln_zeiss_recipe_normalization(mock_read_rcp, mock_archive):
+def test_eln_zeiss_recipe_normalization(mock_read_rcp, client_archive, tmp_path):
     """Test the metadata mapping logic for the RCP schema."""
     # Define constants to avoid PLR2004 magic value linting errors
     expected_datasets = 2
@@ -63,7 +81,7 @@ def test_eln_zeiss_recipe_normalization(mock_read_rcp, mock_archive):
     entry.data_file = 'test.rcp'
 
     # 3. Run Normalization
-    entry.normalize(mock_archive, logger=None)
+    entry.normalize(client_archive, logger=None)
 
     # 4. Assert Data Mapping
     assert entry.recipe_name == 'Test_Battery_Scan'
@@ -79,6 +97,8 @@ def test_eln_zeiss_recipe_normalization(mock_read_rcp, mock_archive):
 
     # total_images has no unit in the schema, so it remains a raw integer
     assert mapped_point.acquisition_setup.total_images == expected_total_images
+    mock_read_rcp.assert_called_once_with(str(tmp_path / 'test.rcp'))
+    assert client_archive.m_context.opened_files[0].closed
 
 
 # Bypass HDF5 physical file writing during the unit test (Removed 'self' from lambda)
@@ -89,7 +109,7 @@ def test_eln_zeiss_recipe_normalization(mock_read_rcp, mock_archive):
 @patch('nomad_measurements_nxtomo.schema_packages.schema_package.extract_preview_image')
 @patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_txrm')
 def test_eln_zeiss_txrm_normalization(
-    mock_read_txrm, mock_extract_image, mock_hdf5_norm, mock_archive
+    mock_read_txrm, mock_extract_image, mock_hdf5_norm, client_archive, tmp_path
 ):
     """Test the metadata mapping logic for the TXRM schema."""
     # Define constants to avoid PLR2004 magic value linting errors
@@ -122,7 +142,7 @@ def test_eln_zeiss_txrm_normalization(
     entry.data_file = 'test.txrm'
 
     # 3. Run Normalization
-    entry.normalize(mock_archive, logger=None)
+    entry.normalize(client_archive, logger=None)
 
     # 4. Assert Data Mapping
     assert entry.software_version == '16.2.1'
@@ -137,6 +157,8 @@ def test_eln_zeiss_txrm_normalization(
     # Assert preview image mapping
     assert result.preview_image is not None
     assert result.preview_image.shape == (1010, 1010)
+    mock_read_txrm.assert_called_once_with(str(tmp_path / 'test.txrm'))
+    assert client_archive.m_context.opened_files[0].closed
 
 
 # Bypass HDF5 physical file writing during the unit test (Removed 'self' from lambda)
@@ -147,7 +169,7 @@ def test_eln_zeiss_txrm_normalization(
 @patch('nomad_measurements_nxtomo.schema_packages.schema_package.extract_preview_image')
 @patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_txm')
 def test_eln_zeiss_txm_normalization(
-    mock_read_txm, mock_extract_image, mock_hdf5_norm, mock_archive
+    mock_read_txm, mock_extract_image, mock_hdf5_norm, client_archive, tmp_path
 ):
     """Test the metadata mapping logic for the TXM schema."""
     # Define constants to avoid PLR2004 magic value linting errors
@@ -186,7 +208,7 @@ def test_eln_zeiss_txm_normalization(
     entry.data_file = 'test.txm'
 
     # 3. Run Normalization
-    entry.normalize(mock_archive, logger=None)
+    entry.normalize(client_archive, logger=None)
 
     # 4. Assert Data Mapping
     assert entry.software_version == '16.2.1'
@@ -202,11 +224,13 @@ def test_eln_zeiss_txm_normalization(
     # Assert preview image mapping
     assert result.preview_image is not None
     assert result.preview_image.shape == (989, 1010)
+    mock_read_txm.assert_called_once_with(str(tmp_path / 'test.txm'))
+    assert client_archive.m_context.opened_files[0].closed
 
 
 @patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_rcp')
 def test_recipe_normalization_fails_on_reader_extraction_error(
-    mock_read_rcp, mock_archive
+    mock_read_rcp, client_archive
 ):
     """Reader failures stop RCP mapping and surface as normalization errors."""
     mock_read_rcp.return_value = RcpData(
@@ -222,7 +246,7 @@ def test_recipe_normalization_fails_on_reader_extraction_error(
         ValueError,
         match='RCP reader extraction failed: invalid recipe container',
     ):
-        entry.normalize(mock_archive, logger=None)
+        entry.normalize(client_archive, logger=None)
 
     assert entry.raw_metadata is None
     assert entry.recipe_name is None
@@ -233,7 +257,7 @@ def test_recipe_normalization_fails_on_reader_extraction_error(
 @patch('nomad_measurements_nxtomo.schema_packages.schema_package.extract_preview_image')
 @patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_txrm')
 def test_txrm_normalization_fails_on_reader_extraction_error(
-    mock_read_txrm, mock_extract_image, mock_archive
+    mock_read_txrm, mock_extract_image, client_archive
 ):
     """Reader failures stop TXRM mapping before setup and result creation."""
     mock_read_txrm.return_value = TxrmData(
@@ -250,7 +274,7 @@ def test_txrm_normalization_fails_on_reader_extraction_error(
         ValueError,
         match='TXRM reader extraction failed: invalid acquisition container',
     ):
-        entry.normalize(mock_archive, logger=None)
+        entry.normalize(client_archive, logger=None)
 
     assert entry.raw_metadata is None
     assert entry.software_version is None
@@ -263,7 +287,7 @@ def test_txrm_normalization_fails_on_reader_extraction_error(
 @patch('nomad_measurements_nxtomo.schema_packages.schema_package.extract_preview_image')
 @patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_txm')
 def test_txm_normalization_fails_on_reader_extraction_error(
-    mock_read_txm, mock_extract_image, mock_archive
+    mock_read_txm, mock_extract_image, client_archive
 ):
     """Reader failures stop TXM mapping before setup and result creation."""
     mock_read_txm.return_value = TxmData(
@@ -280,7 +304,7 @@ def test_txm_normalization_fails_on_reader_extraction_error(
         ValueError,
         match='TXM reader extraction failed: invalid reconstruction container',
     ):
-        entry.normalize(mock_archive, logger=None)
+        entry.normalize(client_archive, logger=None)
 
     assert entry.raw_metadata is None
     assert entry.software_version is None
@@ -292,21 +316,18 @@ def test_txm_normalization_fails_on_reader_extraction_error(
 
 @patch('nomad_measurements_nxtomo.schema_packages.schema_package.extract_preview_image')
 def test_txrm_normalization_fails_for_actual_invalid_file(
-    mock_extract_image, mock_archive, tmp_path
+    mock_extract_image, client_archive, tmp_path
 ):
     """Structural reader validation rejects an actual non-OLE file on disk."""
     invalid_file = tmp_path / 'invalid.txrm'
     invalid_file.write_bytes(b'not an OLE2 container')
-    mock_archive.m_context.upload_files.raw_file_object.return_value.os_path = str(
-        invalid_file
-    )
     entry = ELNZeissTXRM(data_file='invalid.txrm')
 
     with pytest.raises(
         ValueError,
         match='TXRM reader extraction failed: Not a valid OLE2 file:',
     ):
-        entry.normalize(mock_archive, logger=None)
+        entry.normalize(client_archive, logger=None)
 
     assert entry.raw_metadata is None
     assert entry.software_version is None

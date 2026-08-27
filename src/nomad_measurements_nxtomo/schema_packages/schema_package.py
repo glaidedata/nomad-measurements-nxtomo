@@ -145,10 +145,8 @@ class ELNZeissRecipe(BaseNXtomoMeasurement, EntryData):
             return
 
         try:
-            file_path = archive.m_context.upload_files.raw_file_object(
-                self.data_file
-            ).os_path
-            rcp_data = read_rcp(file_path)
+            with archive.m_context.raw_file(self.data_file) as file:
+                rcp_data = read_rcp(file.name)
 
             if 'extraction_error' in rcp_data.metadata:
                 raise ValueError(
@@ -236,10 +234,9 @@ class ELNZeissTXRM(BaseNXtomoMeasurement, EntryData):
             return
 
         try:
-            file_path = archive.m_context.upload_files.raw_file_object(
-                self.data_file
-            ).os_path
-            txrm_data = read_txrm(file_path)
+            with archive.m_context.raw_file(self.data_file) as file:
+                file_path = file.name
+                txrm_data = read_txrm(file_path)
 
             if 'extraction_error' in txrm_data.metadata:
                 raise ValueError(
@@ -333,10 +330,9 @@ class ELNZeissTXM(BaseNXtomoMeasurement, EntryData):
             return
 
         try:
-            file_path = archive.m_context.upload_files.raw_file_object(
-                self.data_file
-            ).os_path
-            txm_data = read_txm(file_path)
+            with archive.m_context.raw_file(self.data_file) as file:
+                file_path = file.name
+                txm_data = read_txm(file_path)
 
             if 'extraction_error' in txm_data.metadata:
                 raise ValueError(
