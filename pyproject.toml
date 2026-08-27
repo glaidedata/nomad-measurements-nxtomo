@@ -13,7 +13,7 @@ classifiers = [
 
 ]
 name = "nomad-measurements-nxtomo"
-description = "NOMAD plugin for parsing ZEISS NXtomo TXRM and RCP data"
+description = "NOMAD plugin for parsing ZEISS NXtomo .rcp, .txrm, and .txm data"
 version = "0.1.0"
 readme = "README.md"
 requires-python = ">=3.10"
