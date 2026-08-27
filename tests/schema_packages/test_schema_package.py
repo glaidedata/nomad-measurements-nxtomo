@@ -101,6 +101,19 @@ def test_eln_zeiss_recipe_normalization(mock_read_rcp, client_archive, tmp_path)
     assert client_archive.m_context.opened_files[0].closed
 
 
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_rcp')
+def test_recipe_normalization_leaves_instrument_model_unset_without_metadata(
+    mock_read_rcp, client_archive
+):
+    """Normalization must not invent an instrument model absent from source data."""
+    mock_read_rcp.return_value = RcpData(metadata={}, recipe_points={})
+    entry = ELNZeissRecipe(data_file='test.rcp')
+
+    entry.normalize(client_archive, logger=None)
+
+    assert entry.instrument_model is None
+
+
 # Bypass HDF5 physical file writing during the unit test (Removed 'self' from lambda)
 @patch(
     'nomad.datamodel.hdf5.HDF5Dataset._normalize_impl',

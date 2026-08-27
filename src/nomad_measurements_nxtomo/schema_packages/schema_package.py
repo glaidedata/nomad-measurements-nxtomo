@@ -107,7 +107,6 @@ class BaseNXtomoMeasurement(Measurement):
     )
     instrument_model = Quantity(
         type=str,
-        default='ZEISS Xradia Versa 610',
         description='The model of the X-ray microscope.',
         a_eln=dict(component=ELNComponentEnum.StringEditQuantity),
     )
