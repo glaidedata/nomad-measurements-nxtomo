@@ -357,7 +357,8 @@ class ELNZeissTXM(BaseNXtomoMeasurement, EntryData):
 
             # Map specific TXM records to results
             res = self.results[0]
-            res.total_slices = txm_data.metadata.get('Total_3D_Slices_or_Blocks', 0)
+            if txm_data.total_planes is not None:
+                res.total_slices = txm_data.total_planes
             res.image_data_catalog = txm_data.image_data_summary
             if txm_data.preview_image is not None:
                 res.preview_image = txm_data.preview_image

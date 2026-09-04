@@ -189,7 +189,8 @@ def test_eln_zeiss_txm_normalization(
     expected_mag = 40.0
     expected_voltage = 80.0
     expected_results_count = 1
-    expected_slices = 1000
+    expected_planes = 4
+    legacy_stream_count = 2
     expected_image_data = 250
 
     # 1. Prepare Mock Data returned by the reader
@@ -198,7 +199,7 @@ def test_eln_zeiss_txm_normalization(
     mock_data = SimpleNamespace(
         metadata={
             'Version': '16.2.1',
-            'Total_3D_Slices_or_Blocks': expected_slices,
+            'Total_3D_Slices_or_Blocks': legacy_stream_count,
         },
         recon_settings={
             'LensMagnification': {'int32': 1100924689, 'float32': expected_mag},
@@ -206,6 +207,7 @@ def test_eln_zeiss_txm_normalization(
             'VoxelSize': {'float32': 2.5},
         },
         image_data_summary={'ImageData1': expected_image_data},
+        total_planes=expected_planes,
         preview_image=preview_image,
         preview_error=None,
     )
@@ -227,7 +229,7 @@ def test_eln_zeiss_txm_normalization(
 
     assert len(entry.results) == expected_results_count
     result = entry.results[0]
-    assert result.total_slices == expected_slices
+    assert result.total_slices == expected_planes
     assert result.image_data_catalog['ImageData1'] == expected_image_data
 
     assert result.preview_image is not None
@@ -237,6 +239,29 @@ def test_eln_zeiss_txm_normalization(
     )
     mock_extract_image.assert_not_called()
     assert client_archive.m_context.opened_files[0].closed
+
+
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_txm')
+def test_txm_normalization_leaves_total_slices_unset_without_verified_plane_count(
+    mock_read_txm, client_archive
+):
+    """The legacy stream count must not substitute for an unverified plane count."""
+    mock_read_txm.return_value = SimpleNamespace(
+        metadata={
+            'Version': '16.2.1',
+            'Total_3D_Slices_or_Blocks': 2,
+        },
+        recon_settings={},
+        image_data_summary={'ImageData1': 2},
+        total_planes=None,
+        preview_image=None,
+        preview_error=None,
+    )
+    entry = ELNZeissTXM(data_file='test.txm')
+
+    entry.normalize(client_archive, logger=None)
+
+    assert entry.results[0].total_slices is None
 
 
 @patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_rcp')
