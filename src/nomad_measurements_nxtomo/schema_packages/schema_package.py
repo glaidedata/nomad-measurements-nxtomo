@@ -103,7 +103,7 @@ class BaseNXtomoMeasurement(Measurement):
         type=str,
         a_eln=dict(component=ELNComponentEnum.FileEditQuantity),
         a_browser=dict(adaptor='RawFileAdaptor'),
-        description='The raw NXtomo data file (.txrm or .rcp).',
+        description='The raw NXtomo data file (.rcp, .txrm, or .txm).',
     )
     instrument_model = Quantity(
         type=str,
