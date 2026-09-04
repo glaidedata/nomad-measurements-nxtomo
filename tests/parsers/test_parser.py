@@ -1,9 +1,11 @@
+import re
 from unittest.mock import MagicMock, patch
 
 import pytest
 from nomad.datamodel.context import ServerContext
 from nomad.datamodel.datamodel import EntryArchive
 
+from nomad_measurements_nxtomo.parsers import parser_entry_point
 from nomad_measurements_nxtomo.parsers.parser import NXtomoParser
 from nomad_measurements_nxtomo.schema_packages.schema_package import (
     ELNZeissRecipe,
@@ -20,6 +22,28 @@ def generated_reference(archive_name):
 
 
 OLE2_SIGNATURE = b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'
+
+
+@pytest.mark.parametrize(
+    ('filename', 'matches'),
+    [
+        ('scan.rcp', True),
+        ('scan.RCP', True),
+        ('scan.RcP', True),
+        ('scan.txrm', True),
+        ('scan.TXRM', True),
+        ('scan.TxRm', True),
+        ('scan.txm', True),
+        ('scan.TXM', True),
+        ('scan.TxM', True),
+        ('scan.txt', False),
+    ],
+)
+def test_nxtomo_entry_point_matches_supported_extensions_case_insensitively(
+    filename, matches
+):
+    """Entry-point matching accepts every suffix case before parser loading."""
+    assert bool(re.fullmatch(parser_entry_point.mainfile_name_re, filename)) is matches
 
 
 @pytest.mark.parametrize('filename', ['scan.rcp', 'scan.txrm', 'scan.txm'])
