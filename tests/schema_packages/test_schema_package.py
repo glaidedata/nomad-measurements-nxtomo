@@ -1,11 +1,373 @@
-import os.path
+from types import SimpleNamespace
+from unittest.mock import patch
 
-from nomad.client import normalize_all, parse
+import numpy as np
+import pytest
+from nomad.datamodel import EntryArchive
+from nomad.datamodel.context import ClientContext
+from nomad.datamodel.datamodel import EntryMetadata
+from readers_ientrance.rcp_reader import RcpData, RecipePoint
+from readers_ientrance.txm_reader import TxmData
+from readers_ientrance.txrm_reader import TxrmData
+
+from nomad_measurements_nxtomo.schema_packages.schema_package import (
+    ELNZeissRecipe,
+    ELNZeissTXM,
+    ELNZeissTXRM,
+)
 
 
-def test_schema_package():
-    test_file = os.path.join('tests', 'data', 'test.archive.yaml')
-    entry_archive = parse(test_file)[0]
-    normalize_all(entry_archive)
+class TrackingClientContext(ClientContext):
+    """Client context that records context-managed raw files for assertions."""
 
-    assert entry_archive.data.message == 'Hello Markus!'
+    def __init__(self, local_dir):
+        super().__init__(local_dir=local_dir)
+        self.opened_files = []
+
+    def raw_file(self, *args, **kwargs):
+        raw_file = super().raw_file(*args, **kwargs)
+        self.opened_files.append(raw_file)
+        return raw_file
+
+
+@pytest.fixture
+def client_archive(tmp_path):
+    """Creates an archive backed by a local portable NOMAD client context."""
+    for filename in (
+        'test.rcp',
+        'test.txrm',
+        'test.txm',
+        'invalid.rcp',
+        'invalid.txrm',
+        'invalid.txm',
+    ):
+        (tmp_path / filename).write_bytes(b'placeholder')
+
+    archive = EntryArchive()
+    archive.m_context = TrackingClientContext(local_dir=str(tmp_path))
+    archive.metadata = EntryMetadata(entry_name='test_entry.archive.json')
+    return archive
+
+
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_rcp')
+def test_eln_zeiss_recipe_normalization(mock_read_rcp, client_archive, tmp_path):
+    """Test the metadata mapping logic for the RCP schema."""
+    # Define constants to avoid PLR2004 magic value linting errors
+    expected_datasets = 2
+    expected_points_count = 1
+    expected_voltage = 70.0
+    expected_exp_time = 1.5
+    expected_total_images = 1200
+
+    # 1. Prepare Mock Data returned by the reader
+    mock_data = RcpData()
+    mock_data.metadata = {
+        'RecipeName': 'Test_Battery_Scan',
+        'NoOfTomoDataSets': {'int32': expected_datasets, 'float32': 2.0},
+    }
+
+    rp = RecipePoint()
+    rp.metadata = {'PointName': 'Scan1'}
+    rp.acquisition_settings.metadata = {
+        'SrcVoltage': {'int32': 1116471296, 'float32': expected_voltage},
+        'ExpTime': {'int32': 1065353216, 'float32': expected_exp_time},
+        'TotalImages': {'int32': expected_total_images, 'float32': 0.0},
+    }
+    mock_data.recipe_points = {'RecipePoint0': rp}
+
+    mock_read_rcp.return_value = mock_data
+
+    # 2. Initialize the ELN Entry
+    entry = ELNZeissRecipe()
+    entry.data_file = 'test.rcp'
+
+    # 3. Run Normalization
+    entry.normalize(client_archive, logger=None)
+
+    # 4. Assert Data Mapping
+    assert entry.recipe_name == 'Test_Battery_Scan'
+    assert entry.number_of_datasets == expected_datasets
+    assert len(entry.recipe_points) == expected_points_count
+
+    mapped_point = entry.recipe_points[0]
+    assert mapped_point.point_name == 'Scan1'
+
+    # Append .magnitude to extract the raw float from NOMAD Quantities with units
+    assert mapped_point.instrument_setup.source_voltage.magnitude == expected_voltage
+    assert mapped_point.acquisition_setup.exposure_time.magnitude == expected_exp_time
+
+    # total_images has no unit in the schema, so it remains a raw integer
+    assert mapped_point.acquisition_setup.total_images == expected_total_images
+    mock_read_rcp.assert_called_once_with(str(tmp_path / 'test.rcp'))
+    assert client_archive.m_context.opened_files[0].closed
+
+
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_rcp')
+def test_recipe_normalization_leaves_instrument_model_unset_without_metadata(
+    mock_read_rcp, client_archive
+):
+    """Normalization must not invent an instrument model absent from source data."""
+    mock_read_rcp.return_value = RcpData(metadata={}, recipe_points={})
+    entry = ELNZeissRecipe(data_file='test.rcp')
+
+    entry.normalize(client_archive, logger=None)
+
+    assert entry.instrument_model is None
+
+
+# Bypass HDF5 physical file writing during the unit test (Removed 'self' from lambda)
+@patch(
+    'nomad.datamodel.hdf5.HDF5Dataset._normalize_impl',
+    side_effect=lambda value, **kwargs: value,
+)
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.extract_preview_image')
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_txrm')
+def test_eln_zeiss_txrm_normalization(
+    mock_read_txrm, mock_extract_image, mock_hdf5_norm, client_archive, tmp_path
+):
+    """Test the metadata mapping logic for the TXRM schema."""
+    # Define constants to avoid PLR2004 magic value linting errors
+    expected_mag = 20.0
+    expected_results_count = 1
+    expected_projections = 2401
+    expected_image_data = 100
+
+    # 1. Prepare Mock Data returned by the reader
+    mock_data = TxrmData()
+    mock_data.metadata = {
+        'Version': '16.2.1',
+        'Total_Projections': expected_projections,
+    }
+    mock_data.acquisition_settings = {
+        'ObjectiveMag': {'int32': 1100924689, 'float32': expected_mag},
+    }
+    mock_data.image_data_summary = {
+        'ImageData1': expected_image_data,
+        'ImageData2': 50,
+    }
+
+    mock_read_txrm.return_value = mock_data
+
+    # Mock the numpy array returned by the image extractor
+    mock_extract_image.return_value = np.zeros((1010, 1010), dtype=np.uint16)
+
+    # 2. Initialize the ELN Entry
+    entry = ELNZeissTXRM()
+    entry.data_file = 'test.txrm'
+
+    # 3. Run Normalization
+    entry.normalize(client_archive, logger=None)
+
+    # 4. Assert Data Mapping
+    assert entry.software_version == '16.2.1'
+    # Objective magnification has no unit, so no .magnitude is needed
+    assert entry.instrument_setup.objective_magnification == expected_mag
+
+    assert len(entry.results) == expected_results_count
+    result = entry.results[0]
+    assert result.total_projections == expected_projections
+    assert result.image_data_catalog['ImageData1'] == expected_image_data
+
+    # Assert preview image mapping
+    assert result.preview_image is not None
+    assert result.preview_image.shape == (1010, 1010)
+    mock_read_txrm.assert_called_once_with(str(tmp_path / 'test.txrm'))
+    assert client_archive.m_context.opened_files[0].closed
+
+
+@patch(
+    'nomad.datamodel.hdf5.HDF5Dataset._normalize_impl',
+    side_effect=lambda value, **kwargs: value,
+)
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.extract_preview_image')
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_txm')
+def test_eln_zeiss_txm_normalization(
+    mock_read_txm, mock_extract_image, mock_hdf5_norm, client_archive, tmp_path
+):
+    """Test the metadata mapping logic for the TXM schema."""
+    # Define constants to avoid PLR2004 magic value linting errors
+    expected_mag = 40.0
+    expected_voltage = 80.0
+    expected_results_count = 1
+    expected_planes = 4
+    legacy_stream_count = 2
+    expected_image_data = 250
+
+    # 1. Prepare Mock Data returned by the reader
+    preview_image = np.zeros((989, 1010), dtype=np.uint16)
+    preview_image[0, 0] = 65535
+    mock_data = SimpleNamespace(
+        metadata={
+            'Version': '16.2.1',
+            'Total_3D_Slices_or_Blocks': legacy_stream_count,
+        },
+        recon_settings={
+            'LensMagnification': {'int32': 1100924689, 'float32': expected_mag},
+            'SourceVoltage': {'int32': 1116471296, 'float32': expected_voltage},
+            'VoxelSize': {'float32': 2.5},
+        },
+        image_data_summary={'ImageData1': expected_image_data},
+        total_planes=expected_planes,
+        preview_image=preview_image,
+        preview_error=None,
+    )
+
+    mock_read_txm.return_value = mock_data
+
+    # 2. Initialize the ELN Entry
+    entry = ELNZeissTXM()
+    entry.data_file = 'test.txm'
+
+    # 3. Run Normalization
+    entry.normalize(client_archive, logger=None)
+
+    # 4. Assert Data Mapping
+    assert entry.software_version == '16.2.1'
+    assert entry.instrument_setup.objective_magnification == expected_mag
+    assert entry.instrument_setup.source_voltage.magnitude == expected_voltage
+    assert 'VoxelSize' in entry.raw_recon_settings
+
+    assert len(entry.results) == expected_results_count
+    result = entry.results[0]
+    assert result.total_slices == expected_planes
+    assert result.image_data_catalog['ImageData1'] == expected_image_data
+
+    assert result.preview_image is not None
+    assert result.preview_image.shape == (989, 1010)
+    mock_read_txm.assert_called_once_with(
+        str(tmp_path / 'test.txm'), include_preview=True
+    )
+    mock_extract_image.assert_not_called()
+    assert client_archive.m_context.opened_files[0].closed
+
+
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_txm')
+def test_txm_normalization_leaves_total_slices_unset_without_verified_plane_count(
+    mock_read_txm, client_archive
+):
+    """The legacy stream count must not substitute for an unverified plane count."""
+    mock_read_txm.return_value = SimpleNamespace(
+        metadata={
+            'Version': '16.2.1',
+            'Total_3D_Slices_or_Blocks': 2,
+        },
+        recon_settings={},
+        image_data_summary={'ImageData1': 2},
+        total_planes=None,
+        preview_image=None,
+        preview_error=None,
+    )
+    entry = ELNZeissTXM(data_file='test.txm')
+
+    entry.normalize(client_archive, logger=None)
+
+    assert entry.results[0].total_slices is None
+
+
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_rcp')
+def test_recipe_normalization_fails_on_reader_extraction_error(
+    mock_read_rcp, client_archive
+):
+    """Reader failures stop RCP mapping and surface as normalization errors."""
+    mock_read_rcp.return_value = RcpData(
+        metadata={
+            'extraction_error': 'invalid recipe container',
+            'RecipeName': 'must not be mapped',
+            'NoOfTomoDataSets': {'int32': 2},
+        }
+    )
+    entry = ELNZeissRecipe(data_file='invalid.rcp')
+
+    with pytest.raises(
+        ValueError,
+        match='RCP reader extraction failed: invalid recipe container',
+    ):
+        entry.normalize(client_archive, logger=None)
+
+    assert entry.raw_metadata is None
+    assert entry.recipe_name is None
+    assert entry.number_of_datasets is None
+    assert not entry.recipe_points
+
+
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.extract_preview_image')
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_txrm')
+def test_txrm_normalization_fails_on_reader_extraction_error(
+    mock_read_txrm, mock_extract_image, client_archive
+):
+    """Reader failures stop TXRM mapping before setup and result creation."""
+    mock_read_txrm.return_value = TxrmData(
+        metadata={
+            'extraction_error': 'invalid acquisition container',
+            'Version': 'must not be mapped',
+            'Total_Projections': 2401,
+        },
+        acquisition_settings={'ObjectiveMag': {'float32': 20.0}},
+    )
+    entry = ELNZeissTXRM(data_file='invalid.txrm')
+
+    with pytest.raises(
+        ValueError,
+        match='TXRM reader extraction failed: invalid acquisition container',
+    ):
+        entry.normalize(client_archive, logger=None)
+
+    assert entry.raw_metadata is None
+    assert entry.software_version is None
+    assert entry.instrument_setup is None
+    assert entry.acquisition_setup is None
+    assert not entry.results
+    mock_extract_image.assert_not_called()
+
+
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.extract_preview_image')
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.read_txm')
+def test_txm_normalization_fails_on_reader_extraction_error(
+    mock_read_txm, mock_extract_image, client_archive
+):
+    """Reader failures stop TXM mapping before setup and result creation."""
+    mock_read_txm.return_value = TxmData(
+        metadata={
+            'extraction_error': 'invalid reconstruction container',
+            'Version': 'must not be mapped',
+            'Total_3D_Slices_or_Blocks': 1000,
+        },
+        recon_settings={'LensMagnification': {'float32': 40.0}},
+    )
+    entry = ELNZeissTXM(data_file='invalid.txm')
+
+    with pytest.raises(
+        ValueError,
+        match='TXM reader extraction failed: invalid reconstruction container',
+    ):
+        entry.normalize(client_archive, logger=None)
+
+    assert entry.raw_metadata is None
+    assert entry.software_version is None
+    assert entry.raw_recon_settings is None
+    assert entry.instrument_setup is None
+    assert not entry.results
+    mock_extract_image.assert_not_called()
+
+
+@patch('nomad_measurements_nxtomo.schema_packages.schema_package.extract_preview_image')
+def test_txrm_normalization_fails_for_actual_invalid_file(
+    mock_extract_image, client_archive, tmp_path
+):
+    """Structural reader validation rejects an actual non-OLE file on disk."""
+    invalid_file = tmp_path / 'invalid.txrm'
+    invalid_file.write_bytes(b'not an OLE2 container')
+    entry = ELNZeissTXRM(data_file='invalid.txrm')
+
+    with pytest.raises(
+        ValueError,
+        match='TXRM reader extraction failed: Not a valid OLE2 file:',
+    ):
+        entry.normalize(client_archive, logger=None)
+
+    assert entry.raw_metadata is None
+    assert entry.software_version is None
+    assert entry.instrument_setup is None
+    assert entry.acquisition_setup is None
+    assert not entry.results
+    mock_extract_image.assert_not_called()

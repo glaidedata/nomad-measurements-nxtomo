@@ -1,6 +1,6 @@
 # nomad-measurements-nxtomo
 
-NOMAD plugin for parsing ZEISS NXtomo TXRM and RCP data
+NOMAD plugin for parsing ZEISS NXtomo `.rcp`, `.txrm`, and `.txm` data
 
 This `nomad` plugin was generated with `Cookiecutter` along with `@nomad`'s [`cookiecutter-nomad-plugin`](https://github.com/FAIRmat-NFDI/cookiecutter-nomad-plugin) template.
 
